@@ -1,11 +1,12 @@
 import { layout } from "./layout.js"
 import Ghost from "./Ghost.js";
+import { AUDIO } from "./Audio.js"
 
 const GRID = document.querySelector(".grid");
 const pacmanStartIndex = 490;
 const numberOfColumns = 28;
 const TILES = [];
-const tileTypes = {
+const TILE_TYPES = {
     0: "pac-dot",
     1: "WALL",
     2: "ghost-lair",
@@ -18,7 +19,7 @@ const DIRECTIONS = {
     left: -1,
     right: 1
 }
-
+let gameOver = false;
 
 // ===== ===== ===== ===== =====
 // Update Score
@@ -69,16 +70,16 @@ function createBoard() {
 
         switch (layout[i]) {
             case 0:
-                tile.tileType = tileTypes[0];
+                tile.tileType = TILE_TYPES[0];
                 break;
             case 1:
-                tile.element.className = tileTypes[1];
+                tile.element.className = TILE_TYPES[1];
                 break;
             case 2:
-                tile.element.className = tileTypes[2];
+                tile.element.className = TILE_TYPES[2];
                 break;
             case 3:
-                tile.tileType = tileTypes[3];
+                tile.tileType = TILE_TYPES[3];
                 break;
         }
 
@@ -108,12 +109,27 @@ function moveToTile(direction) {
     if (targetTile.class === "WALL" || targetTile.class === "ghost-lair")
         return;
 
+    if (targetTile.element.matches("[data-ghost]:not([data-ghost='scared'])")) {
+        gameOver = true;
+        setGameOver();
+        return;
+    }
+
     TILES[pacmanCurrentIndex].emptyTile();
 
-    if (targetTile.tileType === "pac-dot")
+    if (targetTile.tileType === "pac-dot") {
         updateScore(+1);
+        AUDIO.eatDot.play()
+    }
     if (targetTile.tileType === "power-pellet")
         eatPowerPellet();
+    if (targetTile.ghost === "scared") {
+        updateScore(+100);
+        delete targetTile.element.dataset.ghost;
+        const ghost = ghosts
+            .find(the_ghost => the_ghost.currentIndex === pacmanCurrentIndex + direction)
+        ghost.currentIndex = ghost.startIndex;
+    }
 
     pacmanCurrentIndex += direction;
     TILES[pacmanCurrentIndex].tileType = "pac-man"
@@ -147,8 +163,6 @@ function movePacman(e) {
 
 }
 
-window.addEventListener("keydown", movePacman);
-
 // ===== ===== ===== ===== =====
 // Ghosts
 // ===== ===== ===== ===== =====
@@ -162,7 +176,6 @@ const ghosts = [
 
 ghosts.forEach(the_ghost => {
     TILES[the_ghost.currentIndex].ghost = the_ghost.ghostName;
-    // moveGhost(the_ghost);
 });
 
 function moveGhost(the_ghost) {
@@ -172,72 +185,77 @@ function moveGhost(the_ghost) {
         const targetTile = TILES[the_ghost.currentIndex + direction];
 
         if (targetTile.class !== "WALL" && !targetTile.ghost) {
-            delete TILES[the_ghost.currentIndex].element.dataset.ghost;
-            the_ghost.currentIndex += direction
-            if (the_ghost.isScared) targetTile.ghost = "scared";
-            else targetTile.ghost = the_ghost.ghostName;
+            if (targetTile.tileType === "pac-man") {
+                if (the_ghost.isScared) {
+                    updateScore(+100);
+                    delete TILES[the_ghost.currentIndex].element.dataset.ghost;
+                    the_ghost.currentIndex = the_ghost.startIndex;
+                    TILES[the_ghost.currentIndex].ghost = (the_ghost.isScared) ? "scared" : the_ghost.ghostName;
+                } else {
+                    gameOver = true;
+                    setGameOver();
+                }
+            } else {
+                delete TILES[the_ghost.currentIndex].element.dataset.ghost;
+                the_ghost.currentIndex += direction;
+                TILES[the_ghost.currentIndex].ghost = (the_ghost.isScared) ? "scared" : the_ghost.ghostName;
+            }
         }
-
     }, the_ghost.speed)
 }
 
 // ===== ===== ===== ===== =====
-// Check ghost encounters on browser repaint
+// Handle game over
 // ===== ===== ===== ===== =====
 
-function checkGhostEncounter() {
-    const requestID = requestAnimationFrame(checkGhostEncounter)
-    ghosts.forEach(the_ghost => {
-        if (TILES[the_ghost.currentIndex].tileType !== "pac-man")
-            return;
-
-        switch (the_ghost.isScared) {
-            case true:
-                updateScore(+100);
-                delete TILES[the_ghost.currentIndex].element.dataset.ghost;
-                the_ghost.currentIndex = the_ghost.startIndex;
-                break;
-            case false:
-                ghosts.forEach(the_ghost => clearInterval(the_ghost.timerID));
-                window.removeEventListener("keydown", movePacman);
-                setTimeout(() => {
-                    alert("Game Over!")
-                }, 3000);
-                cancelAnimationFrame(requestID);
-                break;
-        }
-    });
-
+function setGameOver() {
+    if (!gameOver) return;
+    window.removeEventListener("keydown", movePacman);
+    ghosts.forEach(the_ghost => clearInterval(the_ghost.timerID));
+    alert('game over')
 }
-
-requestAnimationFrame(checkGhostEncounter)
 
 // ===== ===== ===== ===== =====
 // Start new game
 // ===== ===== ===== ===== =====
 
-function startNewGame() {
-    updateScore(-score);
-
+function activatePacman() {
     TILES[pacmanCurrentIndex].emptyTile();
     pacmanCurrentIndex = pacmanStartIndex;
     TILES[pacmanCurrentIndex].tileType = "pac-man";
     window.addEventListener("keydown", movePacman);
+}
 
-    TILES.forEach((tile, i) => {
-        if (layout[i] === 0) tile.tileType = tileTypes[0];
-        if (layout[i] === 3) tile.tileType = tileTypes[3];
-    });
-
+function activateGhosts() {
     ghosts.forEach(the_ghost => {
+        the_ghost.isScared = false;
         clearInterval(the_ghost.timerID);
-        moveGhost(the_ghost);
         if (the_ghost.currentIndex !== the_ghost.startIndex)
             TILES[the_ghost.currentIndex].emptyTile();
         the_ghost.currentIndex = the_ghost.startIndex;
-        the_ghost.isScared = false;
-    })
+        TILES[the_ghost.currentIndex].ghost = the_ghost.ghostName;
+        setTimeout(() => {
+            moveGhost(the_ghost)
+        }, 1000);
+    });
+}
 
+function startNewGame() {
+
+    gameOver = false;
+
+    updateScore(-score);
+
+    activatePacman()
+
+    TILES.forEach((tile, i) => {
+        if (layout[i] === 0) tile.tileType = TILE_TYPES[0];
+        if (layout[i] === 3) tile.tileType = TILE_TYPES[3];
+    });
+
+    activateGhosts();
+
+    AUDIO.startGame.play();
 }
 
 document.querySelector("#new-game button").addEventListener("click", startNewGame);
